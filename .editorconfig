@@ -1,0 +1,17 @@
+root = true
+
+[*]
+end_of_line = lf
+charset = utf-8
+insert_final_newline = true
+indent_style = space
+
+[*.{xml,properties,yml,yaml}]
+indent_size = 2
+
+[*.java]
+ij_java_class_count_to_use_import_on_demand = 999
+ij_java_names_count_to_use_import_on_demand = 999
+ij_continuation_indent_size = 4
+max_line_length = 120
+indent_size = 4
