@@ -4,8 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import tim4it.login.eko.config.Config;
+import tim4it.login.eko.db.CoreField;
 import tim4it.login.eko.db.SQLiteDB;
-import tim4it.login.eko.db.SQLiteDB.CoreField;
 import tim4it.login.eko.http.HttpStatus;
 import tim4it.login.eko.model.Filter;
 import tim4it.login.eko.model.MetricDefinition;
@@ -92,7 +92,7 @@ public class QueryHandler implements HttpHandler {
                 Object value = filter.value();
 
                 // Check if it's a core field or a registered metric
-                if (SQLiteDB.isCoreField(field)) {
+                if (CoreField.isCoreField(field)) {
                     validateCoreFieldFilter(field, operation, value);
                 } else {
                     validateMetricFilter(conn, field, operation, value);
@@ -105,7 +105,7 @@ public class QueryHandler implements HttpHandler {
      * Validate a filter against a core field.
      */
     private void validateCoreFieldFilter(String field, String operation, Object value) {
-        CoreField coreField = SQLiteDB.getCoreField(field);
+        var coreField = CoreField.getCoreField(field);
         if (coreField == null) {
             throw new IllegalArgumentException("Unknown field: " + field);
         }

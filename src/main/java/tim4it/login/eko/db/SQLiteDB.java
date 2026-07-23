@@ -1,6 +1,5 @@
 package tim4it.login.eko.db;
 
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NonNull;
 import tim4it.login.eko.model.Filter;
@@ -202,64 +201,6 @@ public class SQLiteDB implements AutoCloseable {
     // =========================================================================
 
     /**
-     * Core field definitions with their data types for validation. These fields are stored directly in
-     * telemetry_events, not in EAV metrics.
-     */
-    @Getter
-    @AllArgsConstructor
-    public enum CoreField {
-        RECORDED_AT("STRING"),
-        LATITUDE("NUMBER"),
-        LONGITUDE("NUMBER"),
-        GROUND_SPEED("NUMBER"),
-        SERIAL_NUMBER("STRING"),
-        VEHICLE_TYPE("STRING");
-
-        final String dataType;
-    }
-
-    private static final List<String> CORE_FIELD_NAMES = List.of(
-        "recordedAt", "latitude", "longitude", "groundSpeed",
-        "serialNumber", "vehicleType");
-
-    /**
-     * Check if a field name refers to a core field (telemetry_events column or machine field).
-     */
-    public static boolean isCoreField(String fieldName) {
-        return CORE_FIELD_NAMES.contains(fieldName);
-    }
-
-    /**
-     * Get the core field definition for a given field name.
-     */
-    public static CoreField getCoreField(String fieldName) {
-        return switch (fieldName) {
-            case "recordedAt" -> CoreField.RECORDED_AT;
-            case "latitude" -> CoreField.LATITUDE;
-            case "longitude" -> CoreField.LONGITUDE;
-            case "groundSpeed" -> CoreField.GROUND_SPEED;
-            case "serialNumber" -> CoreField.SERIAL_NUMBER;
-            case "vehicleType" -> CoreField.VEHICLE_TYPE;
-            default -> null;
-        };
-    }
-
-    /**
-     * Map a core field name to its SQL column reference.
-     */
-    public static String coreFieldToColumn(String fieldName) {
-        return switch (fieldName) {
-            case "recordedAt" -> "te.recorded_at";
-            case "latitude" -> "te.latitude";
-            case "longitude" -> "te.longitude";
-            case "groundSpeed" -> "te.ground_speed";
-            case "serialNumber" -> "m.serial_number";
-            case "vehicleType" -> "m.vehicle_type";
-            default -> throw new IllegalArgumentException("Unknown core field: " + fieldName);
-        };
-    }
-
-    /**
      * Execute a filtered query against the telemetry data. Uses a two-phase approach: 1. Find matching event IDs using
      * core fields + EAV metric subqueries 2. Fetch full event data + all metrics for matching events
      *
@@ -299,7 +240,7 @@ public class SQLiteDB implements AutoCloseable {
         var metricDefs = new HashMap<String, MetricDefinition>();
 
         for (var f : filters) {
-            if (isCoreField(f.field())) {
+            if (CoreField.isCoreField(f.field())) {
                 coreFilters.add(f);
             } else {
                 eavFilters.add(f);
@@ -331,7 +272,7 @@ public class SQLiteDB implements AutoCloseable {
                 sql.append(" AND ");
             }
             first = false;
-            var col = coreFieldToColumn(f.field());
+            var col = CoreField.coreFieldToColumn(f.field());
             sql.append(col).append(" ").append(getOperatorSql(f.operation())).append(" ?");
             params.add(prepareFilterValue(f));
         }
