@@ -41,7 +41,7 @@ public class CSVImportService {
      * @param csvContent The raw CSV content
      * @return Import statistics
      */
-    public ImportStats importCSV(String csvContent) throws SQLException {
+    public ImportStats importCSV(@NonNull String csvContent) throws SQLException {
         // Strip UTF-8 BOM if present
         if (csvContent.startsWith("﻿")) {
             csvContent = csvContent.substring(1);
@@ -82,8 +82,8 @@ public class CSVImportService {
         }
 
         // Import data rows
-        int imported = 0;
-        int errors = 0;
+        var imported = 0;
+        var errors = 0;
         try (var conn = db.getConnection()) {
             conn.setAutoCommit(false);
             try {
@@ -116,7 +116,7 @@ public class CSVImportService {
      * Normalize a CSV header to a PascalCase metric name. E.g., "GPS longitude [°]" -> "GpsLongitude" "Grain tank
      * unloading [I/O]" -> "GrainTankUnloading"
      */
-    static String normalizeHeader(String header) {
+    static String normalizeHeader(@NonNull String header) {
         // Remove unit annotation in brackets
         var name = UNIT_PATTERN.matcher(header).replaceAll("").trim();
 
@@ -142,7 +142,7 @@ public class CSVImportService {
     /**
      * Determine vehicle type from serial number pattern. A-prefixed serials -> TRACTOR, C-prefixed -> COMBINE
      */
-    private String determineVehicleType(List<String[]> dataRows, Map<String, Integer> columnIndex) {
+    private String determineVehicleType(@NonNull List<String[]> dataRows, @NonNull Map<String, Integer> columnIndex) {
         if (dataRows.isEmpty()) {
             return "UNKNOWN";
         }
@@ -166,10 +166,10 @@ public class CSVImportService {
      * sample data.
      */
     private Map<String, MetricDefinition> registerMetrics(@NonNull Connection conn,
-                                                          String[] headers,
-                                                          Map<String, Integer> columnIndex,
-                                                          List<String[]> dataRows,
-                                                          String vehicleType) throws SQLException {
+                                                          @NonNull String[] headers,
+                                                          @NonNull Map<String, Integer> columnIndex,
+                                                          @NonNull List<String[]> dataRows,
+                                                          @NonNull String vehicleType) throws SQLException {
         var definitions = new HashMap<String, MetricDefinition>();
 
         // Skip these columns - they're core fields
@@ -209,7 +209,7 @@ public class CSVImportService {
     /**
      * Infer the data type of metric from its header and sample values.
      */
-    private String inferDataType(String header, List<String[]> dataRows, int columnIndex) {
+    private String inferDataType(@NonNull String header, @NonNull List<String[]> dataRows, int columnIndex) {
         // Check for boolean indicators in header
         if (header.endsWith("[I/O]")) {
             return "BOOLEAN";
@@ -221,7 +221,7 @@ public class CSVImportService {
     /**
      * Infer data type from actual sample values.
      */
-    private String inferFromSamples(List<String[]> dataRows, int columnIndex) {
+    private String inferFromSamples(@NonNull List<String[]> dataRows, int columnIndex) {
         int checked = 0;
         for (var row : dataRows) {
             if (checked > 20) {
@@ -267,7 +267,7 @@ public class CSVImportService {
     /**
      * Extract unit from header (text inside brackets).
      */
-    private String extractUnit(String header) {
+    private String extractUnit(@NonNull String header) {
         var bracketStart = header.lastIndexOf('[');
         var bracketEnd = header.lastIndexOf(']');
         if (bracketStart >= 0 && bracketEnd > bracketStart) {
@@ -283,10 +283,12 @@ public class CSVImportService {
     /**
      * Import a single CSV row into the database.
      */
-    private void importRow(Connection conn, String[] row, String[] headers,
-                           Map<String, Integer> columnIndex,
-                           Map<String, MetricDefinition> definitions,
-                           String vehicleType) throws SQLException {
+    private void importRow(@NonNull Connection conn,
+                           @NonNull String[] row,
+                           @NonNull String[] headers,
+                           @NonNull Map<String, Integer> columnIndex,
+                           @NonNull Map<String, MetricDefinition> definitions,
+                           @NonNull String vehicleType) throws SQLException {
 
         // Extract core fields
         var dateTime = parseDateTime(row, columnIndex);
@@ -296,10 +298,10 @@ public class CSVImportService {
         var groundSpeed = parseGroundSpeed(row, columnIndex);
 
         // Get or create machine
-        long machineId = db.getOrCreateMachine(conn, serialNumber, vehicleType);
+        var machineId = db.getOrCreateMachine(conn, serialNumber, vehicleType);
 
         // Insert telemetry event
-        long eventId = db.insertTelemetryEvent(conn, machineId, dateTime, latitude, longitude, groundSpeed);
+        var eventId = db.insertTelemetryEvent(conn, machineId, dateTime, latitude, longitude, groundSpeed);
 
         // Insert EAV metrics
         for (int i = 0; i < headers.length; i++) {
@@ -343,7 +345,7 @@ public class CSVImportService {
     /**
      * Check if a normalized field name is a core field (not stored in EAV).
      */
-    private boolean isCoreField(String normalizedName) {
+    private boolean isCoreField(@NonNull String normalizedName) {
         return switch (normalizedName) {
             case "DateTime", "SerialNumber", "GPSLongitude", "GPSLatitude",
                  "GroundSpeed", "GroundSpeedGearbox" -> true;
@@ -355,7 +357,7 @@ public class CSVImportService {
      * Parse the ground speed value from the CSV row. For tractors: use "Ground speed gearbox" if available. For
      * combines: use "Ground speed".
      */
-    private Double parseGroundSpeed(String[] row, Map<String, Integer> columnIndex) {
+    private Double parseGroundSpeed(@NonNull String[] row, @NonNull Map<String, Integer> columnIndex) {
         // Try "GroundSpeedGearbox" first (tractors)
         var gearboxIdx = columnIndex.get("GroundSpeedGearbox");
         var val1 = parseNumber(row, gearboxIdx);
@@ -368,7 +370,7 @@ public class CSVImportService {
         return parseNumber(row, speedIdx);
     }
 
-    private Double parseNumber(String[] row, Integer gearboxIdx) {
+    private Double parseNumber(@NonNull String[] row, Integer gearboxIdx) {
         if (gearboxIdx != null && gearboxIdx < row.length) {
             var val = row[gearboxIdx].trim();
             if (!val.isEmpty() && !"NA".equalsIgnoreCase(val)) {
@@ -384,7 +386,7 @@ public class CSVImportService {
     /**
      * Parse the Date/Time field from the CSV row.
      */
-    private String parseDateTime(String[] row, Map<String, Integer> columnIndex) {
+    private String parseDateTime(@NonNull String[] row, @NonNull Map<String, Integer> columnIndex) {
         var idx = columnIndex.get("DateTime");
         if (idx == null || idx >= row.length) {
             throw new IllegalArgumentException("Missing Date/Time column");
@@ -403,7 +405,7 @@ public class CSVImportService {
     /**
      * Parse the serial number from the CSV row.
      */
-    private String parseSerialNumber(String[] row, Map<String, Integer> columnIndex) {
+    private String parseSerialNumber(@NonNull String[] row, @NonNull Map<String, Integer> columnIndex) {
         var idx = columnIndex.get("SerialNumber");
         if (idx == null || idx >= row.length) {
             throw new IllegalArgumentException("Missing Serial number column");
@@ -414,7 +416,9 @@ public class CSVImportService {
     /**
      * Parse a double value from the CSV row.
      */
-    private Double parseDouble(String[] row, Map<String, Integer> columnIndex, String fieldName) {
+    private Double parseDouble(@NonNull String[] row,
+                               @NonNull Map<String, Integer> columnIndex,
+                               @NonNull String fieldName) {
         var idx = columnIndex.get(fieldName);
         if (idx == null || idx >= row.length) {
             return null;
@@ -435,7 +439,7 @@ public class CSVImportService {
     /**
      * Parse a boolean value from various string representations.
      */
-    private boolean parseBoolean(String value) {
+    private boolean parseBoolean(@NonNull String value) {
         var lower = value.toLowerCase(Locale.ENGLISH);
         return switch (lower) {
             case "true", "on", "active", "i", "1" -> true;

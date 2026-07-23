@@ -11,6 +11,8 @@ import tim4it.login.eko.model.Filter;
 import tim4it.login.eko.util.Helper;
 import tim4it.login.eko.util.JsonUtil;
 
+import lombok.NonNull;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
@@ -29,7 +31,7 @@ public class QueryHandler implements HttpHandler {
     private final SQLiteDB db;
     private final Config config;
 
-    public QueryHandler(SQLiteDB db, Config config) {
+    public QueryHandler(@NonNull SQLiteDB db, @NonNull Config config) {
         this.db = db;
         this.config = config;
     }
@@ -79,8 +81,8 @@ public class QueryHandler implements HttpHandler {
         if (filters == null || filters.isEmpty()) {
             return; // No filters = return all data
         }
-        try (Connection conn = db.getConnection()) {
-            for (Filter filter : filters) {
+        try (var conn = db.getConnection()) {
+            for (var filter : filters) {
                 if (filter.field() == null || filter.field().isBlank()) {
                     throw new IllegalArgumentException("Filter field cannot be null or empty");
                 }
@@ -102,7 +104,7 @@ public class QueryHandler implements HttpHandler {
     /**
      * Validate a filter against a core field.
      */
-    private void validateCoreFieldFilter(String field, String operation, Object value) {
+    private void validateCoreFieldFilter(@NonNull String field, @NonNull String operation, @NonNull Object value) {
         var coreField = CoreField.getCoreField(field);
         if (coreField == null) {
             throw new IllegalArgumentException("Unknown field: " + field);
@@ -153,7 +155,7 @@ public class QueryHandler implements HttpHandler {
     /**
      * Validate a filter against a registered metric definition.
      */
-    private void validateMetricFilter(Connection conn, String field, String operation, Object value)
+    private void validateMetricFilter(@NonNull Connection conn, @NonNull String field, @NonNull String operation, @NonNull Object value)
         throws SQLException {
         // Look up metric definition
         var def = db.getMetricDefinition(conn, field);
@@ -227,7 +229,7 @@ public class QueryHandler implements HttpHandler {
     /**
      * Get allowed operations for a given data type.
      */
-    private List<String> getAllowedOperations(String dataType) {
+    private List<String> getAllowedOperations(@NonNull String dataType) {
         return switch (dataType) {
             case "NUMBER" -> List.of("Equals", "LessThan", "GreaterThan");
             case "BOOLEAN" -> List.of("Equals");

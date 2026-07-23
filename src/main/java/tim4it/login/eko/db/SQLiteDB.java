@@ -108,7 +108,7 @@ public class SQLiteDB implements AutoCloseable {
     /**
      * Get a metric definition by name. Returns null if not found.
      */
-    public MetricDefinition getMetricDefinition(Connection conn, String metricName) throws SQLException {
+    public MetricDefinition getMetricDefinition(@NonNull Connection conn, @NonNull String metricName) throws SQLException {
         try (var ps = conn.prepareStatement(
             "SELECT metric_name, data_type, unit, description FROM metric_definitions WHERE metric_name = ?")) {
             ps.setString(1, metricName);
@@ -129,7 +129,7 @@ public class SQLiteDB implements AutoCloseable {
     /**
      * Upsert a metric definition.
      */
-    public void upsertMetricDefinition(Connection conn, MetricDefinition def) throws SQLException {
+    public void upsertMetricDefinition(@NonNull Connection conn, @NonNull MetricDefinition def) throws SQLException {
         var sql = """
             INSERT INTO metric_definitions (metric_name, data_type, unit, description)
             VALUES (?, ?, ?, ?)
@@ -154,7 +154,7 @@ public class SQLiteDB implements AutoCloseable {
     /**
      * Insert a telemetry event and return its ID.
      */
-    public long insertTelemetryEvent(Connection conn, long machineId, String recordedAt,
+    public long insertTelemetryEvent(@NonNull Connection conn, long machineId, @NonNull String recordedAt,
                                      Double latitude, Double longitude, Double groundSpeed) throws SQLException {
         try (var ps = conn.prepareStatement(
             "INSERT INTO telemetry_events (machine_id, recorded_at, latitude, longitude, ground_speed) " +
@@ -178,7 +178,7 @@ public class SQLiteDB implements AutoCloseable {
     /**
      * Insert or update a telemetry metric for an event.
      */
-    public void upsertMetric(Connection conn, long eventId, String metricName,
+    public void upsertMetric(@NonNull Connection conn, long eventId, @NonNull String metricName,
                              Double numValue, String strValue) throws SQLException {
         var sql = """
             INSERT INTO telemetry_metrics (event_id, metric_name, num_value, str_value)
@@ -221,7 +221,7 @@ public class SQLiteDB implements AutoCloseable {
     /**
      * Find event IDs matching the given filters. If no filters, returns all event IDs.
      */
-    private List<Long> findMatchingEventIds(Connection conn, List<Filter> filters) throws SQLException {
+    private List<Long> findMatchingEventIds(@NonNull Connection conn, List<Filter> filters) throws SQLException {
         if (filters == null || filters.isEmpty()) {
             // Return all event IDs
             try (var ps = conn.prepareStatement("SELECT id FROM telemetry_events ORDER BY recorded_at");
@@ -267,7 +267,7 @@ public class SQLiteDB implements AutoCloseable {
         var first = true;
 
         // Core field conditions
-        for (Filter f : coreFilters) {
+        for (var f : coreFilters) {
             if (!first) {
                 sql.append(" AND ");
             }
@@ -345,7 +345,7 @@ public class SQLiteDB implements AutoCloseable {
     /**
      * Build full event results for the given event IDs.
      */
-    private List<TelemetryEventResult> buildEventResults(Connection conn, List<Long> eventIds)
+    private List<TelemetryEventResult> buildEventResults(@NonNull Connection conn, @NonNull List<Long> eventIds)
         throws SQLException {
         // Build IN clause
         var sql = new StringBuilder();
@@ -408,7 +408,7 @@ public class SQLiteDB implements AutoCloseable {
      * Prepare the filter value for SQL binding. - Boolean -> 1.0/0.0 for storage comparison - Contains -> add wildcards
      * for LIKE
      */
-    private Object prepareFilterValue(Filter filter) {
+    private Object prepareFilterValue(@NonNull Filter filter) {
         var value = filter.value();
         var op = filter.operation();
 
@@ -433,7 +433,7 @@ public class SQLiteDB implements AutoCloseable {
     /**
      * Determine which storage column (num_value or str_value) to use for a metric.
      */
-    private String getStorageColumn(MetricDefinition def) {
+    private String getStorageColumn(@NonNull MetricDefinition def) {
         return switch (def.dataType()) {
             case "NUMBER", "BOOLEAN" -> "num_value";
             case "STRING" -> "str_value";
@@ -444,7 +444,7 @@ public class SQLiteDB implements AutoCloseable {
     /**
      * Get all metrics for a given telemetry event.
      */
-    private List<MetricValue> getMetricsForEvent(Connection conn, long eventId) throws SQLException {
+    private List<MetricValue> getMetricsForEvent(@NonNull Connection conn, long eventId) throws SQLException {
         var metrics = new ArrayList<MetricValue>();
         try (var ps = conn.prepareStatement(
             "SELECT metric_name, num_value, str_value FROM telemetry_metrics WHERE event_id = ? " +
@@ -480,8 +480,8 @@ public class SQLiteDB implements AutoCloseable {
              var stmt2 = conn.createStatement();
              var rsTelemetry = stmt1.executeQuery("SELECT COUNT(*) FROM telemetry_events");
              var rsMachines = stmt2.executeQuery("SELECT COUNT(*) FROM machines")) {
-            long telemetryCount = rsTelemetry.next() ? rsTelemetry.getLong(1) : 0L;
-            long machinesCount = rsMachines.next() ? rsMachines.getLong(1) : 0L;
+            var telemetryCount = rsTelemetry.next() ? rsTelemetry.getLong(1) : 0L;
+            var machinesCount = rsMachines.next() ? rsMachines.getLong(1) : 0L;
             return Pair.of(telemetryCount, machinesCount);
         }
     }
