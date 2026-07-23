@@ -8,8 +8,6 @@ import tim4it.login.eko.db.CoreField;
 import tim4it.login.eko.db.SQLiteDB;
 import tim4it.login.eko.http.HttpStatus;
 import tim4it.login.eko.model.Filter;
-import tim4it.login.eko.model.MetricDefinition;
-import tim4it.login.eko.model.TelemetryQueryResponse;
 import tim4it.login.eko.util.Helper;
 import tim4it.login.eko.util.JsonUtil;
 
@@ -39,34 +37,34 @@ public class QueryHandler implements HttpHandler {
     @Override
     public void handle(HttpExchange exchange) throws IOException {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-            Helper.sendError(exchange, HttpStatus.METHOD_NOT_ALLOWED, "Method not allowed. Use POST.", config);
+            Helper.sendError(exchange, HttpStatus.METHOD_NOT_ALLOWED, "Method not allowed. Use POST.", config, true);
             return;
         }
         try {
             var body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             if (body.isBlank()) {
                 Helper.sendError(exchange, HttpStatus.BAD_REQUEST,
-                    "Request body is empty. Provide a JSON array of filters.", config);
+                    "Request body is empty. Provide a JSON array of filters.", config, true);
                 return;
             }
 
             // Parse filter array
-            List<Filter> filters = JsonUtil.fromJson(body, new TypeReference<>() {
+            var filters = JsonUtil.fromJson(body, new TypeReference<List<Filter>>() {
             });
 
             // Validate all filters
             validateFilters(filters);
 
             // Execute query
-            TelemetryQueryResponse response = db.queryTelemetry(filters);
+            var response = db.queryTelemetry(filters);
 
-            Helper.sendJson(exchange, HttpStatus.OK, JsonUtil.toJson(response), config);
+            Helper.sendJson(exchange, HttpStatus.OK, JsonUtil.toJson(response), config, true);
         } catch (IllegalArgumentException e) {
-            Helper.sendError(exchange, HttpStatus.BAD_REQUEST, e.getMessage(), config);
+            Helper.sendError(exchange, HttpStatus.BAD_REQUEST, e.getMessage(), config, true);
         } catch (SQLException e) {
-            Helper.sendError(exchange, HttpStatus.INTERNAL_SERVER_ERROR, "Database error: " + e.getMessage(), config);
+            Helper.sendError(exchange, HttpStatus.INTERNAL_SERVER_ERROR, "Database error: " + e.getMessage(), config, true);
         } catch (Exception e) {
-            Helper.sendError(exchange, HttpStatus.BAD_REQUEST, "Invalid query: " + e.getMessage(), config);
+            Helper.sendError(exchange, HttpStatus.BAD_REQUEST, "Invalid query: " + e.getMessage(), config, true);
         }
     }
 
@@ -87,9 +85,9 @@ public class QueryHandler implements HttpHandler {
                     throw new IllegalArgumentException("Filter field cannot be null or empty");
                 }
 
-                String field = filter.field();
-                String operation = filter.operation();
-                Object value = filter.value();
+                var field = filter.field();
+                var operation = filter.operation();
+                var value = filter.value();
 
                 // Check if it's a core field or a registered metric
                 if (CoreField.isCoreField(field)) {
@@ -110,10 +108,10 @@ public class QueryHandler implements HttpHandler {
             throw new IllegalArgumentException("Unknown field: " + field);
         }
 
-        String dataType = coreField.getDataType();
+        var dataType = coreField.getDataType();
 
         // Validate operation compatibility
-        List<String> allowedOps = getAllowedOperations(dataType);
+        var allowedOps = getAllowedOperations(dataType);
         if (!allowedOps.contains(operation)) {
             throw new IllegalArgumentException(
                 String.format("Operation '%s' is invalid for field '%s' of type %s. Allowed: %s",
@@ -158,7 +156,7 @@ public class QueryHandler implements HttpHandler {
     private void validateMetricFilter(Connection conn, String field, String operation, Object value)
         throws SQLException {
         // Look up metric definition
-        MetricDefinition def = db.getMetricDefinition(conn, field);
+        var def = db.getMetricDefinition(conn, field);
         if (def == null) {
             throw new IllegalArgumentException("Unknown metric field: " + field);
         }
@@ -166,7 +164,7 @@ public class QueryHandler implements HttpHandler {
         var dataType = def.dataType();
 
         // Validate operation compatibility
-        List<String> allowedOps = getAllowedOperations(dataType);
+        var allowedOps = getAllowedOperations(dataType);
         if (!allowedOps.contains(operation)) {
             throw new IllegalArgumentException(
                 String.format("Operation '%s' is invalid for metric '%s' of type %s. Allowed: %s",

@@ -77,7 +77,7 @@ public class CSVImportService {
 
         // Register new metric definitions
         Map<String, MetricDefinition> definitions;
-        try (Connection conn = db.getConnection()) {
+        try (var conn = db.getConnection()) {
             definitions = registerMetrics(conn, headers, columnIndex, dataRows, vehicleType);
         }
 
@@ -198,8 +198,7 @@ public class CSVImportService {
             // Extract unit from header
             var unit = extractUnit(originalHeader);
 
-            MetricDefinition def = new MetricDefinition(
-                normalizedName, dataType, unit, originalHeader);
+            var def = new MetricDefinition(normalizedName, dataType, unit, originalHeader);
             db.upsertMetricDefinition(conn, def);
             definitions.put(normalizedName, def);
         }
@@ -272,7 +271,7 @@ public class CSVImportService {
         var bracketStart = header.lastIndexOf('[');
         var bracketEnd = header.lastIndexOf(']');
         if (bracketStart >= 0 && bracketEnd > bracketStart) {
-            String unit = header.substring(bracketStart + 1, bracketEnd);
+            var unit = header.substring(bracketStart + 1, bracketEnd);
             // Skip I/O indicators - they're not units
             if (!"I/O".equalsIgnoreCase(unit) && !unit.isEmpty()) {
                 return unit;

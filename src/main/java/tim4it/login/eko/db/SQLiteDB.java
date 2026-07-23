@@ -299,7 +299,7 @@ public class SQLiteDB implements AutoCloseable {
             var storageCol = getStorageColumn(entry.getValue());
 
             // Find all filters for this metric
-            List<Filter> metricFilters = eavFilters.stream()
+            var metricFilters = eavFilters.stream()
                 .filter(f -> f.field().equals(metricName))
                 .toList();
 

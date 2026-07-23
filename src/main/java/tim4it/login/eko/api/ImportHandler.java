@@ -33,10 +33,9 @@ public class ImportHandler implements HttpHandler {
     @Override
     public void handle(HttpExchange exchange) throws IOException {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-            Helper.sendError(exchange, HttpStatus.METHOD_NOT_ALLOWED, "Method not allowed. Use POST.", config);
+            Helper.sendError(exchange, HttpStatus.METHOD_NOT_ALLOWED, "Method not allowed. Use POST.", config, true);
             return;
         }
-
         try {
             var contentType = exchange.getRequestHeaders().getFirst(Http.CONTENT_TYPE);
             var body = (contentType != null && contentType.contains("multipart/form-data")) ?
@@ -44,7 +43,7 @@ public class ImportHandler implements HttpHandler {
                 new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
 
             if (body.isBlank()) {
-                Helper.sendError(exchange, HttpStatus.BAD_REQUEST, "Request body is empty", config);
+                Helper.sendError(exchange, HttpStatus.BAD_REQUEST, "Request body is empty", config, true);
                 return;
             }
 
@@ -57,13 +56,13 @@ public class ImportHandler implements HttpHandler {
                 "metricCount", stats.metricCount()
             ));
 
-            Helper.sendJson(exchange, HttpStatus.OK, response, config);
+            Helper.sendJson(exchange, HttpStatus.OK, response, config, true);
         } catch (IllegalArgumentException e) {
-            Helper.sendError(exchange, HttpStatus.BAD_REQUEST, e.getMessage(), config);
+            Helper.sendError(exchange, HttpStatus.BAD_REQUEST, e.getMessage(), config, true);
         } catch (SQLException e) {
-            Helper.sendError(exchange, HttpStatus.INTERNAL_SERVER_ERROR, "Database error: " + e.getMessage(), config);
+            Helper.sendError(exchange, HttpStatus.INTERNAL_SERVER_ERROR, "Database error: " + e.getMessage(), config, true);
         } catch (Exception e) {
-            Helper.sendError(exchange, HttpStatus.INTERNAL_SERVER_ERROR, "Import failed: " + e.getMessage(), config);
+            Helper.sendError(exchange, HttpStatus.INTERNAL_SERVER_ERROR, "Import failed: " + e.getMessage(), config, true);
         }
     }
 

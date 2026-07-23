@@ -13,11 +13,11 @@ import tim4it.login.eko.db.CSVImportService;
 import tim4it.login.eko.db.SQLiteDB;
 import tim4it.login.eko.http.Http;
 import tim4it.login.eko.http.HttpStatus;
+import tim4it.login.eko.util.Helper;
 import tim4it.login.eko.util.JsonUtil;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 /**
@@ -90,16 +90,11 @@ final class Startup {
             exchange.sendResponseHeaders(HttpStatus.NO_CONTENT.getCode(), -1);
             return;
         }
-
-        var body = JsonUtil.toJson(Map.of(
-            "status", "error",
-            "error", "Not found. Use /import or /query."
-        ));
-        sendJson(exchange, HttpStatus.NOT_FOUND, body);
+        Helper.sendError(exchange, HttpStatus.NOT_FOUND, "Not found. Use /import or /query.", config, false);
     }
 
     void handleInfo(@NonNull HttpExchange exchange) throws IOException {
-        sendJson(exchange, HttpStatus.OK, JsonUtil.toJson(config));
+        Helper.sendJson(exchange, HttpStatus.OK, JsonUtil.toJson(config), config, false);
     }
 
     void handleHealth(@NonNull HttpExchange exchange) {
@@ -110,15 +105,11 @@ final class Startup {
                 "machines", eventMachineCountPair.second(),
                 "events", eventMachineCountPair.first()
             ));
-            sendJson(exchange, HttpStatus.OK, body);
+            Helper.sendJson(exchange, HttpStatus.OK, body, config, false);
         } catch (Exception e) {
             log.error("Health check failed", e);
-            var body = JsonUtil.toJson(Map.of(
-                "status", "error",
-                "error", e.getMessage()
-            ));
             try {
-                sendJson(exchange, HttpStatus.INTERNAL_SERVER_ERROR, body);
+                Helper.sendError(exchange, HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage(), config, false);
             } catch (IOException ioException) {
                 log.error("Failed to send error response", ioException);
             }
@@ -129,14 +120,5 @@ final class Startup {
         headers.set(Http.ACCESS_CONTROL_ALLOW_ORIGIN, config.corsAllowOrigins());
         headers.set(Http.ACCESS_CONTROL_ALLOW_METHODS, config.corsAllowMethods());
         headers.set(Http.ACCESS_CONTROL_ALLOW_HEADERS, config.corsAllowHeaders());
-    }
-
-    void sendJson(@NonNull HttpExchange exchange, @NonNull HttpStatus status, @NonNull String body) throws IOException {
-        exchange.getResponseHeaders().set(Http.CONTENT_TYPE, Http.APPLICATION_JSON);
-        var bytes = body.getBytes(StandardCharsets.UTF_8);
-        exchange.sendResponseHeaders(status.getCode(), bytes.length);
-        try (var os = exchange.getResponseBody()) {
-            os.write(bytes);
-        }
     }
 }
