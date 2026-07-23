@@ -121,7 +121,7 @@ public class CSVImportService {
         var name = UNIT_PATTERN.matcher(header).replaceAll("").trim();
 
         // Replace special characters with spaces
-        name = name.replaceAll("[/°]", " ");
+        name = name.replaceAll("[/°.]", " ");
 
         // Collapse multiple spaces
         name = name.replaceAll("\\s+", " ");
@@ -174,7 +174,7 @@ public class CSVImportService {
 
         // Skip these columns - they're core fields
         var skipFields = Set.of(
-            "DateTime", "SerialNumber", "GpsLongitude", "GpsLatitude",
+            "DateTime", "SerialNumber", "GPSLongitude", "GPSLatitude",
             "GroundSpeed", "GroundSpeedGearbox");
 
         for (int i = 0; i < headers.length; i++) {
@@ -292,8 +292,8 @@ public class CSVImportService {
         // Extract core fields
         var dateTime = parseDateTime(row, columnIndex);
         var serialNumber = parseSerialNumber(row, columnIndex);
-        var longitude = parseDouble(row, columnIndex, "GpsLongitude");
-        var latitude = parseDouble(row, columnIndex, "GpsLatitude");
+        var longitude = parseDouble(row, columnIndex, "GPSLongitude");
+        var latitude = parseDouble(row, columnIndex, "GPSLatitude");
         var groundSpeed = parseGroundSpeed(row, columnIndex);
 
         // Get or create machine
@@ -346,7 +346,7 @@ public class CSVImportService {
      */
     private boolean isCoreField(String normalizedName) {
         return switch (normalizedName) {
-            case "DateTime", "SerialNumber", "GpsLongitude", "GpsLatitude",
+            case "DateTime", "SerialNumber", "GPSLongitude", "GPSLatitude",
                  "GroundSpeed", "GroundSpeedGearbox" -> true;
             default -> false;
         };

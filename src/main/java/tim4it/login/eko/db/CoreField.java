@@ -25,22 +25,22 @@ public enum CoreField {
     final String columnName;
 
     public static boolean isCoreField(@NonNull String fieldName) {
-        return Arrays.stream(values()).map(Enum::name)
-            .anyMatch(name -> name.equalsIgnoreCase(fieldName));
+        return Arrays.stream(values()).map(f -> f.name)
+            .anyMatch(n -> n.equalsIgnoreCase(fieldName));
     }
 
     public static CoreField getCoreField(@NonNull String fieldName) {
         return Arrays.stream(values())
-            .filter(coreField -> coreField.name().equalsIgnoreCase(fieldName))
+            .filter(f -> f.name.equalsIgnoreCase(fieldName))
             .findFirst()
             .orElse(null);
     }
 
     public static String coreFieldToColumn(@NonNull String fieldName) {
         return Arrays.stream(values())
-            .filter(coreField -> coreField.name().equalsIgnoreCase(fieldName))
+            .filter(f -> f.name.equalsIgnoreCase(fieldName))
             .findFirst()
-            .map(it -> it.columnName)
+            .map(cf -> cf.columnName)
             .orElseThrow(() -> new IllegalArgumentException("Unknown core field: " + fieldName));
     }
 }

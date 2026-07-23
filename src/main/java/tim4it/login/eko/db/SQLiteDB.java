@@ -408,6 +408,13 @@ public class SQLiteDB implements AutoCloseable {
             return b ? 1.0 : 0.0;
         }
 
+        // Convert boolean string variants ("on", "off", "true", "false", "1", "0")
+        if (value instanceof String s) {
+            var lower = s.toLowerCase();
+            if ("true".equals(lower) || "on".equals(lower) || "1".equals(lower)) return 1.0;
+            if ("false".equals(lower) || "off".equals(lower) || "0".equals(lower)) return 0.0;
+        }
+
         return value;
     }
 
