@@ -13,7 +13,7 @@ import java.util.Arrays;
 @Getter
 @AllArgsConstructor
 public enum CoreField {
-    RECORDED_AT("STRING", "recordedAt", "te.recorded_at"),
+    RECORDED_AT("DATE", "recordedAt", "te.recorded_at"),
     LATITUDE("NUMBER", "latitude", "te.latitude"),
     LONGITUDE("NUMBER", "longitude", "te.longitude"),
     GROUND_SPEED("NUMBER", "groundSpeed", "te.ground_speed"),

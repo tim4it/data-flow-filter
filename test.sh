@@ -299,8 +299,8 @@ echo -e "${BLD}  TEST SUITE: POST /query — Core Fields${RST}"
 echo -e "${BLD}================================================================${RST}"
 # ============================================================================
 
-# ── RecordedAt (STRING) ─────────────────────────────────────────────────────
-echo -e "\n  ${BLD}--- RecordedAt (STRING) ---${RST}"
+# ── RecordedAt (DATE) ───────────────────────────────────────────────────────
+echo -e "\n  ${BLD}--- RecordedAt (DATE) ---${RST}"
 
 query "RecordedAt Equals" '[{"field":"RecordedAt","operation":"Equals","value":"2023-03-31T05:54:27"}]'
 assert_count_gt "RecordedAt Equals → matches" "0"
@@ -313,6 +313,18 @@ assert_count_gt "RecordedAt Contains '2022' → matches" "0"
 
 query "RecordedAt no-match" '[{"field":"RecordedAt","operation":"Contains","value":"1999"}]'
 assert_count_zero "RecordedAt Contains '1999' → 0"
+
+query "RecordedAt GreaterThan" '[{"field":"RecordedAt","operation":"GreaterThan","value":"2023-03-31T00:00:00"}]'
+assert_count_gt "RecordedAt > 2023-03-31 → matches" "0"
+
+query "RecordedAt LessThan" '[{"field":"RecordedAt","operation":"LessThan","value":"2022-10-08T00:00:00"}]'
+assert_count_gt "RecordedAt < 2022-10-08 → matches" "0"
+
+query "RecordedAt GreaterThan no-match" '[{"field":"RecordedAt","operation":"GreaterThan","value":"2099-01-01T00:00:00"}]'
+assert_count_zero "RecordedAt > 2099-01-01 → 0"
+
+query "RecordedAt LessThan no-match" '[{"field":"RecordedAt","operation":"LessThan","value":"2000-01-01T00:00:00"}]'
+assert_count_zero "RecordedAt < 2000-01-01 → 0"
 
 # ── SerialNumber (STRING) ───────────────────────────────────────────────────
 echo -e "\n  ${BLD}--- SerialNumber (STRING) ---${RST}"

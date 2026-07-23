@@ -142,6 +142,14 @@ public class QueryHandler implements HttpHandler {
             throw new IllegalArgumentException(
                 String.format("Value '%s' is not a valid number for field '%s'", value, field));
         }
+
+        // For DATE fields, validate the value is a string
+        if ("DATE".equals(dataType)) {
+            if (!(value instanceof String)) {
+                throw new IllegalArgumentException(
+                    String.format("Value '%s' is not a valid date for field '%s'. Use ISO-8601 format.", value, field));
+            }
+        }
     }
 
     /**
@@ -226,6 +234,7 @@ public class QueryHandler implements HttpHandler {
             case "NUMBER" -> List.of("Equals", "LessThan", "GreaterThan");
             case "BOOLEAN" -> List.of("Equals");
             case "STRING" -> List.of("Equals", "Contains");
+            case "DATE" -> List.of("Equals", "LessThan", "GreaterThan", "Contains");
             default -> throw new IllegalArgumentException("Unknown data type: " + dataType);
         };
     }

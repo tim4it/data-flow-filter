@@ -17,7 +17,7 @@ CREATE TABLE machines (
 CREATE TABLE telemetry_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     machine_id INTEGER NOT NULL REFERENCES machines(id),
-    recorded_at TEXT NOT NULL,
+    recorded_at DATETIME NOT NULL,
     latitude REAL,
     longitude REAL,
     ground_speed REAL

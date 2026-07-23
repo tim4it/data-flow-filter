@@ -273,7 +273,19 @@ public class SQLiteDB implements AutoCloseable {
             }
             first = false;
             var col = CoreField.coreFieldToColumn(f.field());
-            sql.append(col).append(" ").append(getOperatorSql(f.operation())).append(" ?");
+            var coreField = CoreField.getCoreField(f.field());
+
+            // For DATE fields, use datetime() for proper comparison
+            if ("DATE".equals(coreField.getDataType())) {
+                if ("Contains".equals(f.operation())) {
+                    sql.append(col).append(" LIKE ?");
+                } else {
+                    sql.append("datetime(").append(col).append(")").append(" ")
+                        .append(getOperatorSql(f.operation())).append(" datetime(?)");
+                }
+            } else {
+                sql.append(col).append(" ").append(getOperatorSql(f.operation())).append(" ?");
+            }
             params.add(prepareFilterValue(f));
         }
 
