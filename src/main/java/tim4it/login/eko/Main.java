@@ -1,11 +1,10 @@
 package tim4it.login.eko;
 
-/**
- * Entry point for the data-flow-filter application.
- */
+import tim4it.login.eko.config.Config;
+
 public class Main {
 
-    static void main(String[] args) {
-        System.out.println("Hello from data-flow-filter!");
+    static void main(String[] ignore) {
+        new Startup(Config.load()).run();
     }
 }
