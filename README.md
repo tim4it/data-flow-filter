@@ -72,11 +72,11 @@ Client (browser / script)
   telemetry_metrics.metric_name  -- references metric_definitions.metric_name (no FK enforced)
 
 Indexes:
-  idx_metrics_name      ON telemetry_metrics(metric_name)
-  idx_metrics_num       ON telemetry_metrics(metric_name, num_value)
-  idx_metrics_str       ON telemetry_metrics(metric_name, str_value)
+  idx_metrics_name       ON telemetry_metrics(metric_name)
+  idx_metrics_num        ON telemetry_metrics(metric_name, num_value)
+  idx_metrics_str        ON telemetry_metrics(metric_name, str_value)
   idx_events_recorded_at ON telemetry_events(recorded_at)
-  idx_events_machine    ON telemetry_events(machine_id)
+  idx_events_machine     ON telemetry_events(machine_id)
 ```
 
 ### Tables Explained
