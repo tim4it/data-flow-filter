@@ -4,7 +4,7 @@ Walking through the architectural choices that shaped **data-flow-filter**, the 
 
 ---
 
-## Architecture Decisions (Made)
+## Architecture Decisions
 
 ### 1. No web framework — `com.sun.net.httpserver` (JDK built-in)
 
@@ -76,7 +76,7 @@ Walking through the architectural choices that shaped **data-flow-filter**, the 
 
 ---
 
-## Optimization Roadmap (If We Have More Time)
+## Optimization Roadmap
 
 ### Priority 1: Pagination on `/query` endpoint
 
@@ -523,6 +523,245 @@ components:
 
 **Keeping it in sync:** Add a CI step that starts the server, fetches `/openapi.yaml`, and diffs it against `openapi.yaml` in the repo. If they diverge, the build fails. This ensures the spec and implementation never drift.
 
+### Priority 18: Containerization (Docker)
+
+**Problem:** No `Dockerfile` or `docker-compose.yml`. Deploying the app requires a JDK install, Gradle build, and manual config on every target machine. Reproducing the environment across dev, staging, and production is error-prone — "works on my machine" is the default state.
+
+**Approach — multi-stage Dockerfile:**
+
+```dockerfile
+# Stage 1: Build (Gradle + JDK 25)
+FROM eclipse-temurin:25-jdk AS build
+WORKDIR /app
+COPY --chown=appuser:appuser gradle wrapper settings.gradle.kts build.gradle.kts ./
+COPY --chown=appuser:appuser src ./src
+RUN ./gradlew installDist --no-daemon
+
+# Stage 2: Runtime (JRE only, no build tools)
+FROM eclipse-temurin:25-jre
+WORKDIR /app
+COPY --from=build /app/build/install/data-flow-filter ./
+# Database volume for persistence
+VOLUME ["/app/DB"]
+EXPOSE 8080
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:8080/ready || exit 1
+ENTRYPOINT ["./bin/data-flow-filter"]
+```
+
+**Why multi-stage:** The final image contains only the JRE (~180MB) and the app — no Gradle, no JDK compiler, no source code. Smaller attack surface, faster pulls.
+
+**docker-compose.yml for local development:**
+
+```yaml
+services:
+  data-flow-filter:
+    build: .
+    ports: ["8080:8080"]
+    volumes:
+      - db-data:/app/DB
+      - ./config:/app/config
+    environment:
+      - SERVER_PORT=8080
+volumes:
+  db-data:
+```
+
+**Impact:**
+- One-command deploy: `docker build -t data-flow-filter . && docker run -p 8080:8080 data-flow-filter`
+- Health probes (Priority 14) are wired into `HEALTHCHECK` — Docker natively monitors `/ready`
+- Database persistence via volume mount on `/app/DB`
+- Config override via volume mount on `/config` or environment variables
+
+**Alternative considered:** JLink custom runtime image. Rejected — adds build complexity for marginal size savings (JRE image is already ~180MB). Revisit if image size becomes a concern.
+
+### Priority 19: CI/CD pipeline
+
+**Problem:** No automated build, test, or deploy. Everything is manual — `./gradlew build`, `./test.sh`, `docker build`. No gate preventing broken code from reaching production. No automated regression detection.
+
+**Approach — GitHub Actions (`.github/workflows/ci.yml`):**
+
+```yaml
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 25 }
+      # Unit tests (fast, isolated)
+      - run: ./gradlew test
+      # Integration tests (full server + CSV import + query)
+      - run: ./test.sh
+      # Validate OpenAPI spec
+      - run: |
+          docker run --rm -v ${{ github.workspace }}:/spec \
+            ghcr.io/openapi-contrib/openapi-validator:latest \
+            /spec/openapi.yaml
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Build Docker image
+      - uses: docker/build-push-action@v5
+        with:
+          push: false  # push only on main branch
+          tags: data-flow-filter:${{ github.sha }}
+```
+
+**Pipeline stages:**
+1. **Unit tests** — `./gradlew test` (fast, ~5s)
+2. **Integration tests** — `./test.sh` (full server lifecycle, ~30s)
+3. **OpenAPI spec validation** — ensure `openapi.yaml` is valid OpenAPI 3.1
+4. **Docker build** — build the image, tag with git SHA
+5. **Docker push** — push to registry (GHCR, ECR) on main branch only
+6. **Deploy** — trigger deployment to staging/production (manual approval gate for production)
+
+**Quality gates:**
+- All unit tests must pass
+- All integration tests must pass
+- OpenAPI spec must be valid
+- Docker build must succeed
+- Code coverage threshold (e.g. 80% branch coverage after Priority 13)
+
+**Why GitHub Actions over Jenkins/GitLab CI:** Zero infrastructure to maintain, free for public repos, native git integration. The pipeline definition lives in the repo (`.github/workflows/`) — no external configuration to drift.
+
+**Alternative considered:** Gradle-only pipeline (no Docker in CI). Rejected — building the Docker image in CI catches container-specific issues (missing files, wrong permissions) before deployment.
+
+### Priority 20: Graceful shutdown
+
+**Problem:** `Startup.run()` has no shutdown hook. When the JVM receives SIGTERM (Docker stop, Kubernetes pod termination, `systemctl stop`), the following happens:
+- In-flight HTTP requests are abruptly killed — clients get connection reset
+- The thread pool is discarded without draining — queued requests never execute
+- SQLite WAL file is left uncheckpointed — next startup must replay the WAL (slower)
+- No cleanup logging — operators don't know if shutdown was clean
+
+**Approach — `Runtime.addShutdownHook()`:**
+
+```java
+Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+    log.info("Shutdown initiated — stopping server gracefully...");
+
+    // 1. Stop accepting new requests
+    server.stop(0);  // 0 = don't wait, just stop accepting
+
+    // 2. Drain in-flight requests (wait up to 30s)
+    executor.shutdown();
+    try {
+        if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
+            executor.shutdownNow();  // force kill remaining
+        }
+    } catch (InterruptedException e) {
+        executor.shutdownNow();
+    }
+
+    // 3. Checkpoint SQLite WAL (flush to main DB file)
+    try (var conn = db.getConnection();
+         var stmt = conn.createStatement()) {
+        stmt.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+        log.info("SQLite WAL checkpointed successfully");
+    } catch (SQLException e) {
+        log.warn("WAL checkpoint failed: {}", e.getMessage());
+    }
+
+    log.info("Shutdown complete");
+}));
+```
+
+**What this achieves:**
+- **No dropped requests:** In-flight queries complete before shutdown
+- **Clean WAL state:** `wal_checkpoint(TRUNCATE)` flushes the WAL to the main DB and deletes the WAL file — next startup is faster
+- **Observable shutdown:** Log messages mark shutdown start and completion — operators can verify clean shutdown in logs
+- **Bounded wait:** 30-second timeout prevents hanging forever if a query is stuck
+
+**Docker integration:** Docker sends SIGTERM on `docker stop`, waits 10 seconds (configurable with `-t`), then sends SIGKILL. The 30-second drain timeout should be shorter than Docker's stop grace period. Configure with `docker stop -t 35` or `stopGracePeriod: 40s` in docker-compose.
+
+**Kubernetes integration:** K8s sends SIGTERM on pod termination, waits `terminationGracePeriodSeconds` (default 30s), then SIGKILL. The shutdown hook fits within this window. For longer drain times, increase `terminationGracePeriodSeconds` in the pod spec.
+
+### Priority 21: SQLite backup & restore
+
+**Problem:** The entire data store is a single file (`DB/data_flow-filter.db`). No backup strategy means a corrupted file, disk failure, or accidental `rm` is total data loss. With millions of events, re-importing all CSVs from scratch is impractical.
+
+**Approach — three layers of protection:**
+
+**Layer 1: Hot backup via SQLite backup API (no DB lock):**
+
+```java
+public void backup(@NonNull Connection source, @NonNull String backupPath) throws SQLException {
+    try (var backupConn = DriverManager.getConnection("jdbc:sqlite:" + backupPath)) {
+        var backup = new org.sqlite.jdbc4.JDBC4Backup(backupConn, "main", source, "main");
+        backup.step(-1);  // -1 = copy all pages at once
+        if (backup.finish() != 0) {
+            throw new SQLException("Backup failed");
+        }
+    }
+}
+```
+
+- Uses `org.sqlite.jdbc4.JDBC4Backup` — copies the database page by page without locking readers
+- Can run while queries are executing (WAL mode allows concurrent reads)
+- Add a `POST /backup?path=/path/to/backup.db` endpoint for on-demand backup
+- Schedule periodic backups via cron or systemd timer (e.g. daily at 2 AM)
+
+**Layer 2: WAL checkpoint on schedule:**
+
+```java
+// Run periodically (e.g. every hour) to keep WAL file small
+try (var conn = db.getConnection();
+     var stmt = conn.createStatement();
+     var rs = stmt.executeQuery("PRAGMA wal_checkpoint(PASSIVE)")) {
+    if (rs.next()) {
+        var result = rs.getInt(0);  // 0=success, 1=busy, 2=lock
+        log.info("WAL checkpoint result: {}", result == 0 ? "OK" : "busy");
+    }
+}
+```
+
+- `PRAGMA wal_checkpoint(PASSIVE)` — checkpoint if no writers are active, skip otherwise (non-blocking)
+- Keeps the WAL file small — reduces recovery time after crash
+- Run as a scheduled task or on the `/health` endpoint (passive, no impact on query latency)
+
+**Layer 3: File-level backup (Docker volume):**
+
+```bash
+# Automated backup script (runs via cron)
+#!/bin/bash
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+docker exec data-flow-filter \
+  sqlite3 /app/DB/data_flow-filter.db \
+  ".backup /app/DB/backup_${TIMESTAMP}.db"
+# Copy to remote storage (S3, NFS, etc.)
+docker cp data-flow-filter:/app/DB/backup_${TIMESTAMP}.db /backups/
+```
+
+**Restore procedure:**
+
+```bash
+# Stop the container
+docker stop data-flow-filter
+# Replace the DB with a backup
+docker cp backup_20260724_020000.db data-flow-filter:/app/DB/data_flow-filter.db
+# Remove WAL and SHM files (they'll be recreated)
+docker exec data-flow-filter rm -f /app/DB/data_flow-filter.db-wal /app/DB/data_flow-filter.db-shm
+# Start the container
+docker start data-flow-filter
+# Verify
+curl http://localhost:8080/health
+```
+
+**Backup retention policy:** Keep daily backups for 7 days, weekly backups for 4 weeks, monthly backups for 12 months. Delete older backups automatically.
+
+**Why not just rely on Docker volume snapshots:** Volume snapshots are infrastructure-dependent (EBS snapshots, ZFS clones) and may not be available in all environments. SQLite's native backup API works everywhere — Docker, bare metal, VM.
+
 ---
 
 ## Summary: What We'd Do Differently Before Shipping to Production
@@ -544,5 +783,9 @@ components:
 | App info | Raw Config (6 fields) | Structured: app, config, DB, JVM, stats (Priority 15) |
 | Versioning | None | /version with git commit + build metadata (Priority 16) |
 | API docs | README prose only | OpenAPI 3.1 spec + Swagger UI (Priority 17) |
+| Containerization | Manual JDK + Gradle build | Docker multi-stage image (Priority 18) |
+| CI/CD | Manual build, test, deploy | GitHub Actions: test → build → deploy (Priority 19) |
+| Shutdown | Abrupt (no hook) | Graceful: drain requests + WAL checkpoint (Priority 20) |
+| Data safety | Single DB file, no backup | Hot backup + WAL checkpoint + restore procedure (Priority 21) |
 
-The lowest-effort, highest-impact changes are **Priority 2** (metric cache — 10 lines), **Priority 7** (virtual threads — 1 line), **Priority 8** (streaming CSV — 5 lines), **Priority 16** (/version — Gradle task + one handler), and **Priority 17** (OpenAPI spec — hand-authored YAML, no runtime dependency). The highest-value investments are **Priority 1** (pagination), **Priority 3** (observability), **Priority 6** (index tuning), and **Priority 13** (unit tests).
+The lowest-effort, highest-impact changes are **Priority 2** (metric cache — 10 lines), **Priority 7** (virtual threads — 1 line), **Priority 8** (streaming CSV — 5 lines), **Priority 16** (/version — Gradle task + one handler), **Priority 17** (OpenAPI spec — hand-authored YAML), and **Priority 20** (graceful shutdown — one shutdown hook). The highest-value investments are **Priority 1** (pagination), **Priority 3** (observability), **Priority 6** (index tuning), **Priority 13** (unit tests), **Priority 18** (Docker), and **Priority 19** (CI/CD).
