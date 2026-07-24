@@ -78,7 +78,7 @@ public class CSVImportService {
         // Register new metric definitions
         Map<String, MetricDefinition> definitions;
         try (var conn = db.getConnection()) {
-            definitions = registerMetrics(conn, headers, columnIndex, dataRows, vehicleType);
+            definitions = registerMetrics(conn, headers, dataRows);
         }
 
         // Import data rows
@@ -167,9 +167,7 @@ public class CSVImportService {
      */
     private Map<String, MetricDefinition> registerMetrics(@NonNull Connection conn,
                                                           @NonNull String[] headers,
-                                                          @NonNull Map<String, Integer> columnIndex,
-                                                          @NonNull List<String[]> dataRows,
-                                                          @NonNull String vehicleType) throws SQLException {
+                                                          @NonNull List<String[]> dataRows) throws SQLException {
         var definitions = new HashMap<String, MetricDefinition>();
 
         // Skip these columns - they're core fields

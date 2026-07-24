@@ -326,6 +326,14 @@ sqlite> SELECT te.recorded_at, m.serial_number, tm.metric_name, tm.num_value
        LIMIT 10;
 ```
 
+### Integration testing
+
+Provided script execute integration testing - import/query. It executes server and then uploads the CSV data to database and perform additional queries and checks. For test execution **database must be clean** (already clean in the repository). At the end of testing server is destroyed and write server logs to `server.log` 
+
+```bash
+./test.sh
+```
+
 ### Inspect Database Schema
 
 ```bash

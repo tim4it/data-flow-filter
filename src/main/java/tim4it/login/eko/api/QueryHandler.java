@@ -3,6 +3,7 @@ package tim4it.login.eko.api;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
+import lombok.NonNull;
 import tim4it.login.eko.config.Config;
 import tim4it.login.eko.db.CoreField;
 import tim4it.login.eko.db.SQLiteDB;
@@ -10,8 +11,6 @@ import tim4it.login.eko.http.HttpStatus;
 import tim4it.login.eko.model.Filter;
 import tim4it.login.eko.util.Helper;
 import tim4it.login.eko.util.JsonUtil;
-
-import lombok.NonNull;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -120,11 +119,6 @@ public class QueryHandler implements HttpHandler {
                     operation, field, dataType, allowedOps));
         }
 
-        // Validate value type
-        if (value == null) {
-            throw new IllegalArgumentException("Filter value cannot be null for field: " + field);
-        }
-
         // For NUMBER fields, validate the value is numeric
         if ("NUMBER".equals(dataType)) {
             if (value instanceof Number) {
@@ -171,11 +165,6 @@ public class QueryHandler implements HttpHandler {
             throw new IllegalArgumentException(
                 String.format("Operation '%s' is invalid for metric '%s' of type %s. Allowed: %s",
                     operation, field, dataType, allowedOps));
-        }
-
-        // Validate value type
-        if (value == null) {
-            throw new IllegalArgumentException("Filter value cannot be null for metric: " + field);
         }
 
         switch (dataType) {
