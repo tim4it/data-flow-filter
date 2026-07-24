@@ -256,6 +256,273 @@ while (rows.hasNext()) {
 - Add `maxRequestSize` configuration to reject oversized bodies
 - Document TLS termination via reverse proxy (nginx, Caddy) as the recommended deployment pattern
 
+### Priority 13: Unit test coverage
+
+**Problem:** The project has zero unit tests — JUnit Jupiter is declared as a dependency but `src/test/` is empty. All verification is done through `test.sh`, a ~950-line Bash integration test. Integration tests catch end-to-end bugs but are slow (spin up the full server, import CSVs, tear down), don't isolate individual components, and can't easily cover edge cases inside business logic.
+
+**What to unit test (high-impact targets):**
+- **`CSVImportService.normalizeHeader()`** — static method, pure function. Test every transformation: unit stripping (`[°]`, `[km/h]`, `[I/O]`), special character replacement (`/`, `°`, `.`), multi-space collapse, PascalCase conversion, empty/whitespace input. This is the single most exercised code path — runs once per column per import.
+- **`CSVImportService.inferDataType()`** — test BOOLEAN detection (`[I/O]` header, `on`/`off`/`active`/`inactive` values), NUMBER detection (3+ numeric samples), STRING fallback, all-NA columns, mixed valid/invalid samples.
+- **`CSVImportService.extractUnit()`** — test bracket extraction, `[I/O]` skip, nested brackets, no brackets.
+- **`CSVImportService.parseBoolean()`** — test every variant: `true`/`false`, `on`/`off`, `active`/`inactive`, `i`/`o`, `1`/`0`, case insensitivity.
+- **`SQLiteDB.findMatchingEventIds()`** — test SQL generation for core field filters, EAV metric subqueries, combined filters, empty filter list, multiple filters on same metric.
+- **`SQLiteDB.getOperatorSql()`** — test every operation: `Equals`, `LessThan`, `GreaterThan`, `Contains`, unknown operation.
+- **`SQLiteDB.prepareFilterValue()`** — test boolean conversion (`true` -> `1.0`, `"on"` -> `1.0`, `"0"` -> `0.0`), LIKE wildcard wrapping, passthrough for numbers and strings.
+- **`SQLiteDB.getStorageColumn()`** — test `NUMBER` -> `num_value`, `BOOLEAN` -> `num_value`, `STRING` -> `str_value`, unknown type throws.
+- **`QueryHandler.validateFilters()`** — test field existence validation, operation compatibility per data type, value type checking, null/empty field rejection.
+- **`CoreField.isCoreField()` / `getCoreField()` / `coreFieldToColumn()`** — test case insensitivity, all 6 core fields, unknown field behavior.
+- **`Config.parse()`** — test valid config, missing keys (fallback defaults), invalid port range, invalid thread pool size, system property override.
+
+**Approach:**
+- JUnit Jupiter (already a dependency) with AssertJ for fluent assertions
+- Use an in-memory SQLite database (`jdbc:sqlite::memory:`) for DB-layer unit tests — no filesystem dependency
+- Test class per source class: `CSVImportServiceTest`, `SQLiteDBTest`, `QueryHandlerTest`, `ConfigTest`, `CoreFieldTest`
+- Target: 80%+ branch coverage on business logic classes (import service, query handler, DB layer)
+
+**Why not just rely on integration tests:** Integration tests verify the pipeline works but don't tell you *where* it broke. Unit tests isolate the faulty component, run in milliseconds (not seconds), and serve as executable documentation for edge-case behavior.
+
+### Priority 14: Proper health check endpoints (Kubernetes-style probes)
+
+**Problem:** The current `/health` endpoint returns machine/event counts — a useful statistic but not a health probe. It doesn't distinguish between "the JVM started" and "the database is accessible." Load balancers and orchestrators (Kubernetes, Docker Compose, systemd) need structured health signals to make lifecycle decisions.
+
+**Approach — four distinct signals:**
+
+| Endpoint | Purpose | What it checks | Response |
+|----------|---------|----------------|----------|
+| `GET /live` | **Liveness probe** | JVM is alive, HTTP server is accepting requests | `{"status":"alive"}` (200) — always succeeds if reachable |
+| `GET /started` | **Startup probe** | Application finished initialization (Flyway migrations completed, HTTP server bound) | `{"status":"started"}` (200) or `{"status":"starting"}` (503) |
+| `GET /ready` | **Readiness probe** | Application is ready to serve requests — database connection works, thread pool is available | `{"status":"ready"}` (200) or `{"status":"not_ready","reason":"..."}` (503) |
+| `GET /health` | **Composite health** | Aggregates all checks with component-level detail | `{"status":"healthy","components":[...]}` (200) or `{"status":"unhealthy",...}` (503) |
+
+**Implementation details:**
+- **`/live`** — Minimal handler, no DB access. Returns 200 unconditionally. This is the signal Kubernetes uses to decide whether to kill and restart the pod.
+- **`/started`** — A `volatile boolean started` flag in `Startup`, set to `true` after `migrateDatabase()` completes and `server.start()` succeeds. Returns 503 during initialization so load balancers don't send traffic to a booting instance.
+- **`/ready`** — Opens a SQLite connection, runs `PRAGMA integrity_check`, verifies the thread pool isn't saturated. Returns 503 with a reason string if any check fails. This is the signal Kubernetes uses to decide whether to route traffic to the pod.
+- **`/health`** — Composite endpoint that runs all the above checks plus additional diagnostics:
+  - Database: connection test, WAL mode status, foreign key enforcement status, event/machine counts
+  - Server: thread pool size, active threads, port
+  - JVM: uptime, heap usage, GC count
+  - Each component reports `{ name, status, details }` — `status` is `healthy`, `degraded`, or `unhealthy`
+
+**Why four endpoints instead of one:** Orchestrators need different signals at different lifecycle stages. A liveness probe must be fast and reliable (never false-positive "dead"). A readiness probe can be thorough (DB check, thread pool check). Combining them into one endpoint forces trade-offs that break one use case or the other.
+
+### Priority 15: Rich `/info` endpoint (application state without secrets)
+
+**Problem:** The current `/info` endpoint returns the raw `Config` record — 6 properties (port, thread pool size, DB path, CORS settings). Useful but incomplete: it tells you how the app was configured, not how it's running.
+
+**Approach — structured response with categorized sections:**
+
+```json
+{
+  "application": {
+    "name": "data-flow-filter",
+    "version": "1.0.0-SNAPSHOT",
+    "javaVersion": "25",
+    "startTime": "2026-07-24T10:30:00Z",
+    "uptimeSeconds": 3600
+  },
+  "configuration": {
+    "serverPort": 8080,
+    "serverThreadPoolSize": 4,
+    "databasePath": "DB/data_flow-filter.db",
+    "corsAllowOrigins": "*",
+    "corsAllowMethods": "GET, POST, OPTIONS",
+    "corsAllowHeaders": "Content-Type",
+    "configSources": ["classpath:application.properties", "config/application.properties"]
+  },
+  "database": {
+    "type": "sqlite",
+    "version": "3.53.2.0",
+    "walMode": true,
+    "foreignKeysEnabled": true,
+    "schemaVersion": "1",
+    "path": "/absolute/path/to/data_flow-filter.db",
+    "fileSizeBytes": 12345678
+  },
+  "statistics": {
+    "machines": 4,
+    "events": 9028,
+    "metricDefinitions": 42,
+    "metricRows": 379176,
+    "lastImportTime": "2026-07-24T10:00:00Z"
+  },
+  "jvm": {
+    "heapUsedBytes": 67108864,
+    "heapMaxBytes": 536870912,
+    "nonHeapUsedBytes": 33554432,
+    "threadCount": 42,
+    "gcCount": 15,
+    "gcTimeMs": 230
+  }
+}
+```
+
+**Design principles:**
+- **No secrets:** Never expose API keys, database passwords, or internal IPs. The current config has no secrets, but the pattern should be explicit.
+- **Config sources:** List which config files were actually loaded (classpath defaults, user override, system properties) so operators can verify their overrides took effect.
+- **Database state:** WAL mode and foreign key status are per-connection settings — reporting them confirms they're enforced. Schema version from Flyway tells you which migration is active.
+- **JVM state:** Heap usage and thread count help diagnose memory leaks and thread exhaustion without needing JMX access.
+- **Statistics:** Machine/event/metric counts give a quick data inventory. `lastImportTime` tells you how fresh the data is.
+
+**Alternative considered:** Expose JMX metrics via Jolokia. Rejected — adds a dependency and opens a broad attack surface. The `/info` endpoint gives us the specific data points we need.
+
+### Priority 16: `/version` endpoint (build metadata)
+
+**Problem:** When running multiple instances or rolling deployments, there's no way to verify which version of the code is running on a given instance. The `version` in `build.gradle.kts` (`1.0.0-SNAPSHOT`) is generic — it doesn't tell you which commit is deployed.
+
+**Approach — embed build-time metadata:**
+
+```json
+{
+  "application": {
+    "name": "data-flow-filter",
+    "version": "1.0.0-SNAPSHOT"
+  },
+  "build": {
+    "gitCommit": "bdf7a4b",
+    "gitCommitFull": "bdf7a4b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7",
+    "gitBranch": "main",
+    "buildTime": "2026-07-24T12:00:00Z",
+    "javaVersion": "25",
+    "osName": "Linux",
+    "osVersion": "7.0.0-28-generic"
+  }
+}
+```
+
+**Implementation:**
+- Use Gradle's `processResources` task to generate a `build-info.properties` file at build time
+- Read git data via JGit (add `org.eclipse.jgit:org.eclipse.jgit` as a buildscript dependency) or via `git rev-parse HEAD` in the Gradle task
+- Write properties: `git.commit.id`, `git.commit.id.abbrev`, `git.branch`, `build.time`, `java.version`, `os.name`
+- At runtime, load `build-info.properties` from the classpath and serve via `GET /version`
+- If the properties file is missing (local dev build), return a fallback with `"build": {"note": "build metadata not available"}`
+
+**Why not just use the Gradle version property:** The version string (`1.0.0-SNAPSHOT`) is manually set and doesn't change between builds. Git commit SHA is unique per build and lets you trace any runtime issue back to the exact code. This is essential for debugging in production ("which version introduced this regression?").
+
+**Alternative considered:** Spring Boot Actuator's `/actuator/info` (auto-generates build info). Rejected — we're not using Spring Boot. The Gradle + properties approach is framework-agnostic and adds zero runtime dependencies.
+
+### Priority 17: OpenAPI / Swagger documentation
+
+**Problem:** There's no machine-readable API specification. The `README.md` documents endpoints with curl examples, but that's human-facing prose — not something a client SDK generator, API gateway, or contract-testing tool can consume. Internal consumers (dashboard frontend, CI/CD pipeline validation scripts, downstream services) currently reverse-engineer the API from the README or trial-and-error.
+
+**Approach — two deliverables:**
+
+**1. OpenAPI 3.1 specification (`openapi.yaml`)** — the source of truth, maintained alongside the code:
+
+```yaml
+openapi: "3.1.0"
+info:
+  title: Data-Flow-Filter
+  version: "1.0.0-SNAPSHOT"
+  description: Telemetry ingestion and query service for agricultural machinery
+paths:
+  /import:
+    post:
+      summary: Import CSV telemetry data
+      requestBody:
+        content:
+          text/csv:
+            schema:
+              type: string
+              format: binary
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Import successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResponse"
+        "400":
+          description: Invalid request (empty body, malformed CSV)
+        "500":
+          description: Database error
+  /query:
+    post:
+      summary: Query telemetry data with filters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FilterArray"
+      responses:
+        "200":
+          description: Query results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryResponse"
+        ...
+components:
+  schemas:
+    Filter:
+      type: object
+      required: [field, value]
+      properties:
+        field: { type: string }
+        operation: { type: string, enum: [Equals, LessThan, GreaterThan, Contains], default: Equals }
+        value: { oneOf: [{ type: number }, { type: boolean }, { type: string }] }
+    ImportResponse:
+      type: object
+      properties:
+        status: { type: string, example: "ok" }
+        importedRows: { type: integer }
+        errors: { type: integer }
+        metricCount: { type: integer }
+    QueryResponse:
+      type: object
+      properties:
+        results: { type: array, items: { $ref: "#/components/schemas/TelemetryEventResult" } }
+        totalCount: { type: integer }
+    ...
+```
+
+**What the spec covers:**
+- All endpoints: `/import`, `/query`, `/health`, `/info`, `/live`, `/started`, `/ready`, `/version`
+- Request schemas: `Filter` (with operation enum, polymorphic value), `FilterArray`
+- Response schemas: `ImportResponse`, `QueryResponse`, `TelemetryEventResult`, `MetricValue`, `HealthStatus`, `AppInfo`, `VersionInfo`
+- Error schemas: `ErrorResponse` (`{ status: "error", error: "message" }`)
+- Content types: `text/csv`, `multipart/form-data`, `application/json`
+- HTTP status codes with descriptions (200, 400, 405, 500, 503)
+- Examples for each endpoint (realistic payloads from the test suite)
+- Security scheme placeholder (API key header, documented but not enforced until Priority 12)
+
+**2. Swagger UI served at `GET /swagger`** — interactive API explorer for developers:
+
+- Embed **Swagger UI** (static HTML/JS, no server-side dependency) as a classpath resource
+- The `/swagger` handler serves `swagger-ui.html` with the OpenAPI spec loaded from `GET /openapi.yaml`
+- Also serve the raw spec at `GET /openapi.yaml` so tools can fetch it at runtime
+- No build-time code generation — the YAML is hand-authored and stays in sync with the code
+
+**Why hand-authored YAML over annotation-driven generation:**
+
+| | Hand-authored YAML | Annotation-driven (e.g. SmallRye OpenAPI) |
+|---|---|---|
+| Runtime dependency | None | Annotation processor + runtime scanner |
+| Framework coupling | Zero | Java annotation API |
+| Spec quality | Full control, human-readable | Fragile, often requires overrides |
+| Maintenance | Explicit — drift is obvious | Implicit — easy to forget updating |
+| Build speed | No impact | Adds annotation processing time |
+
+**Alternative considered:** SmallRye OpenAPI (annotation-based, framework-agnostic). Rejected — adds an annotation processor dependency and couples the API spec to Java source. Hand-authored YAML is the spec, the code implements it — not the other way around.
+
+**Alternative considered:** SpringDoc OpenAPI (auto-generates from Spring MVC controllers). Rejected — requires Spring Boot, which we're deliberately avoiding.
+
+**Who benefits:**
+- **Internal frontend team** — auto-generate TypeScript types and fetch clients from the spec (`openapi-typescript`, `orval`)
+- **QA team** — contract testing with `schemathesis` or `dredd` to catch API drift
+- **API consumers** — Swagger UI for interactive exploration ("what fields does /query accept?")
+- **CI/CD** — validate the spec is valid (`openapi-validator`) and that the spec matches the running instance (fetch `/openapi.yaml` and diff against repo)
+
+**Keeping it in sync:** Add a CI step that starts the server, fetches `/openapi.yaml`, and diffs it against `openapi.yaml` in the repo. If they diverge, the build fails. This ensures the spec and implementation never drift.
+
 ---
 
 ## Summary: What We'd Do Differently Before Shipping to Production
@@ -272,5 +539,10 @@ while (rows.hasNext()) {
 | API surface | 4 endpoints | Metadata endpoints + import progress (Priority 10) |
 | Data lifecycle | Unbounded growth | Archival + purge strategy (Priority 11) |
 | Security | None | API key auth + size limits + TLS (Priority 12) |
+| Testing | Integration only (test.sh) | Unit tests for all business logic (Priority 13) |
+| Health probes | Single /health (stats only) | /live, /started, /ready, /health (Priority 14) |
+| App info | Raw Config (6 fields) | Structured: app, config, DB, JVM, stats (Priority 15) |
+| Versioning | None | /version with git commit + build metadata (Priority 16) |
+| API docs | README prose only | OpenAPI 3.1 spec + Swagger UI (Priority 17) |
 
-The lowest-effort, highest-impact changes are **Priority 2** (metric cache — 10 lines), **Priority 7** (virtual threads — 1 line), and **Priority 8** (streaming CSV — 5 lines). The highest-value investments are **Priority 1** (pagination), **Priority 3** (observability), and **Priority 6** (index tuning).
+The lowest-effort, highest-impact changes are **Priority 2** (metric cache — 10 lines), **Priority 7** (virtual threads — 1 line), **Priority 8** (streaming CSV — 5 lines), **Priority 16** (/version — Gradle task + one handler), and **Priority 17** (OpenAPI spec — hand-authored YAML, no runtime dependency). The highest-value investments are **Priority 1** (pagination), **Priority 3** (observability), **Priority 6** (index tuning), and **Priority 13** (unit tests).
